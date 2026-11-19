@@ -1,20 +1,17 @@
 FROM python:3.11-slim
 
-# Installation de curl et d'Ollama
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://ollama.com/install.sh | sh
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-WORKDIR /app
+WORKDIR $HOME/app
 
-# Installation des dépendances Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-# Copie de ton code et de tes données
-COPY app.py data.txt start.sh ./
-RUN chmod +x start.sh
+COPY --chown=user . .
 
-# Hugging Face Spaces utilise le port 7860
 EXPOSE 7860
 
-CMD ["./start.sh"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
