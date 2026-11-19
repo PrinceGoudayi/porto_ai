@@ -1,40 +1,47 @@
+from pathlib import Path
 from dotenv import load_dotenv
 import os
 import json
+import math
 from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import chromadb
-from sentence_transformers import SentenceTransformer
 from google import genai
 from google.genai import types
 
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
 app = FastAPI()
 
-# Autoriser ton futur site portfolio à appeler cette API (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tu pourras restreindre à l'URL de ton portfolio plus tard
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-load_dotenv()
-# Initialisation des clients (ChromaDB + Gemini)
-chroma_client = chromadb.PersistentClient(path=".chroma_db/")
+
 gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-embedding_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
 with open("data.txt", "r", encoding="utf-8") as f:
     contenu = f.read()
 
 chunks = [c.strip() for c in contenu.split("\n\n") if c.strip()]
-embeddings = embedding_model.encode(chunks)
-ids = [str(i) for i in range(len(chunks))]
 
-collection = chroma_client.get_or_create_collection("porto_collection")
-collection.upsert(documents=chunks, embeddings=embeddings, ids=ids)
+def get_embeddings(texts: list[str]) -> list[list[float]]:
+    res = gemini_client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=texts,
+    )
+    return [e.values for e in res.embeddings]
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+chunk_embeddings = get_embeddings(chunks)
 
 system_prompt = """
 Tu es le petit gardien chibi officiel du portfolio de Prince Goudayi.
@@ -60,11 +67,15 @@ def health_check():
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    query_embedding = embedding_model.encode([req.question])
-    results = collection.query(query_embeddings=query_embedding, n_results=2)
-    contexte = "\n\n".join(results["documents"][0])
-
     try:
+        query_emb = get_embeddings([req.question])[0]
+        scored = sorted(
+            zip(chunks, chunk_embeddings),
+            key=lambda item: cosine_similarity(query_emb, item[1]),
+            reverse=True,
+        )
+        contexte = "\n\n".join(chunk for chunk, _ in scored[:2])
+
         response = gemini_client.models.generate_content(
             model="gemini-3.5-flash-lite",
             contents=f"CONTEXTE :\n{contexte}\n\nQUESTION DU VISITEUR : {req.question}",
