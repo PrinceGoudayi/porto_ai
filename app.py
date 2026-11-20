@@ -132,19 +132,21 @@ def chat(req: ChatRequest):
         contexte = "\n\n".join(chunk for chunk, _ in scored[:2])
 
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+            model="gemini-3.5-flash-lite",
             contents=f"CONTEXTE :\n{contexte}\n\nQUESTION DU VISITEUR : {req.question}",
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
                 response_schema=ChibiResponse,
                 temperature=0.4,
-                max_output_tokens=350,
+                max_output_tokens=1000,
                 thinking_config=types.ThinkingConfig(
-                    thinking_budget=0,
+                    thinking_level=types.ThinkingLevel.MINIMAL,
                 ),
             ),
         )
+        if response.parsed:
+            return {"emotion": response.parsed.emotion, "reponse": response.parsed.reponse}
         data = json.loads(response.text)
         return {"emotion": data["emotion"], "reponse": data["reponse"]}
 
