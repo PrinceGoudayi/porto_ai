@@ -21,7 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+if not api_key:
+    raise RuntimeError("Variable d'environnement GEMINI_API_KEY ou GOOGLE_API_KEY manquante.")
+
+gemini_client = genai.Client(api_key=api_key)
 
 with open("data.txt", "r", encoding="utf-8") as f:
     contenu = f.read()
@@ -128,18 +132,22 @@ def chat(req: ChatRequest):
         contexte = "\n\n".join(chunk for chunk, _ in scored[:2])
 
         response = gemini_client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model="gemini-2.5-flash-lite",
             contents=f"CONTEXTE :\n{contexte}\n\nQUESTION DU VISITEUR : {req.question}",
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
                 response_schema=ChibiResponse,
                 temperature=0.4,
-                max_output_tokens=180,
+                max_output_tokens=350,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0,
+                ),
             ),
         )
         data = json.loads(response.text)
         return {"emotion": data["emotion"], "reponse": data["reponse"]}
 
     except Exception as e:
+        print(f"Erreur dans /chat: {e}")
         raise HTTPException(status_code=500, detail=f"Erreur serveur : {str(e)}")
